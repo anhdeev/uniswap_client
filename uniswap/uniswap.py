@@ -171,10 +171,10 @@ class Uniswap:
         if self.version == 1:
             factory_contract_addresses = {
                 "mainnet": "0xc0a47dFe034B400B47bDaD5FecDa2621de6c4d95",
-                "ropsten": "0x9c83dCE8CA20E9aAF9D3efc003b2ea62aBC08351",
-                "rinkeby": "0xf5D915570BC477f9B8D6C0E980aA81757A3AaC36",
-                "kovan": "0xD3E51Ef092B2845f10401a0159B2B96e8B6c3D30",
-                "görli": "0x6Ce570d02D73d4c384b46135E87f8C592A8c86dA",
+                #"ropsten": "0x9c83dCE8CA20E9aAF9D3efc003b2ea62aBC08351",
+                #"rinkeby": "0xf5D915570BC477f9B8D6C0E980aA81757A3AaC36",
+                #"kovan": "0xD3E51Ef092B2845f10401a0159B2B96e8B6c3D30",
+                #"görli": "0x6Ce570d02D73d4c384b46135E87f8C592A8c86dA",
             }
 
             self.factory_contract = self._load_contract(
@@ -433,26 +433,27 @@ class Uniswap:
         return self._build_and_send_tx(function)
 
     # ------ Make Trade ----------------------------------------------------------------
-    @check_approval
     def make_trade(
         self,
         input_token: AddressLike,
         output_token: AddressLike,
         qty: Union[int, Wei],
-        recipient: AddressLike = None,
+        amountOutMin: int,
+        recipient: AddressLike = None
     ) -> HexBytes:
         """Make a trade by defining the qty of the input token."""
         if input_token == ETH_ADDRESS:
-            return self._eth_to_token_swap_input(output_token, Wei(qty), recipient)
+            print("Make a trade by defining the qty of the input token" + str(qty))
+            return self._eth_to_token_swap_input(output_token, Wei(qty), amountOutMin, recipient)
         else:
             balance = self.get_token_balance(input_token)
             if balance < qty:
                 raise InsufficientBalance(balance, qty)
             if output_token == ETH_ADDRESS:
-                return self._token_to_eth_swap_input(input_token, qty, recipient)
+                return self._token_to_eth_swap_input(input_token, qty, amountOutMin, recipient)
             else:
                 return self._token_to_token_swap_input(
-                    input_token, qty, output_token, recipient
+                    input_token, qty, output_token, amountOutMin, recipient
                 )
 
     @check_approval
@@ -480,10 +481,12 @@ class Uniswap:
                 )
 
     def _eth_to_token_swap_input(
-        self, output_token: AddressLike, qty: Wei, recipient: Optional[AddressLike]
+        self, output_token: AddressLike, qty: Wei, amount_out_min: int, recipient: Optional[AddressLike]
     ) -> HexBytes:
         """Convert ETH to tokens given an input amount."""
         eth_balance = self.get_eth_balance()
+        print("current eth balance " + str(eth_balance))
+        print("dersired eth spend " + str(qty))
         if qty > eth_balance:
             raise InsufficientBalance(eth_balance, qty)
 
@@ -500,19 +503,26 @@ class Uniswap:
         else:
             if recipient is None:
                 recipient = self.address
-            amount_out_min = int(
-                (1 - self.max_slippage)
-                * self.get_eth_token_input_price(output_token, qty)
-            )
+
+            print("Buying with amout_out_min = " + str(amount_out_min) + " to eth address " + str(recipient))
             return self._build_and_send_tx(
                 self.router.functions.swapExactETHForTokens(
-                    amount_out_min,
+                    (int)(amount_out_min),
                     [self.get_weth_address(), output_token],
                     recipient,
                     self._deadline(),
                 ),
                 self._get_tx_params(qty),
             )
+
+    def get_pair(self, token_a, token_b):
+        """
+        Gets the address of the pair for token_a and token_b,
+        if it has been created, else 0x0.
+        :return: Address of the pair.
+        """
+
+        return self.factory_contract.functions.getPair(token_a, token_b).call()
 
     def _token_to_eth_swap_input(
         self, input_token: AddressLike, qty: int, recipient: Optional[AddressLike]
@@ -765,8 +775,9 @@ class Uniswap:
             logger.debug(f"nonce: {tx_params['nonce']}")
             self.last_nonce = Nonce(tx_params["nonce"] + 1)
 
-    def _get_tx_params(self, value: Wei = Wei(0), gas: Wei = Wei(250000)) -> TxParams:
+    def _get_tx_params(self, value: Wei = Wei(0), gas: Wei = Wei(40000000000000)) -> TxParams:
         """Get generic transaction parameters."""
+        print("input amount = " + str(value))
         return {
             "from": _addr_to_str(self.address),
             "value": value,
